@@ -250,6 +250,21 @@ export async function getPendingTransactions(params: {
     }
 }
 
+export async function getAllPendingTransactions() {
+    try {
+        return models.Transaction.findAll({
+            attributes: ["hash", "seq", "signer"],
+            where: {
+                isPending: true
+            },
+            order: [["pendingTimestamp", "DESC"]]
+        });
+    } catch (err) {
+        console.error(err);
+        throw Exception.DBError();
+    }
+}
+
 export async function getAllPendingTransactionHashes() {
     try {
         return models.Transaction.findAll({
@@ -333,6 +348,40 @@ export async function removePendings(hashes: H256[]): Promise<void> {
         throw Exception.DBError();
     }
 }
+
+export async function newRemovePendingstest(
+    indexed: SignedTransaction[]
+): Promise<TransactionInstance[]> {
+    try {
+        return await models.Transaction.findAll({
+            where: {
+                [Sequelize.Op.and]: [
+                    { isPending: true },
+                    {
+                        [Sequelize.Op.or]: indexed.map(i => ({
+                            [Sequelize.Op.and]: [
+                                {
+                                    seq: i.toJSON().seq,
+                                    signer: strip0xPrefix(i.getSignerAddress({networkId: i.toJSON().networkId}).value)
+                                },
+                                {
+                                    [Sequelize.Op.not]: {
+                                        hash: strip0xPrefix(i.hash().value)
+                                    }
+                                }
+                            ]
+                        }))
+                    }
+                ]
+            }
+        });
+    } catch (err) {
+        console.error(err);
+        throw Exception.DBError();
+    }
+}
+
+
 
 function addAddressQuery(query: any[], address: string) {
     query.push({

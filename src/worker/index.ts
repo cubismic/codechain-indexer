@@ -9,6 +9,7 @@ import * as BlockModel from "../models/logic/block";
 import * as TxModel from "../models/logic/transaction";
 import * as AccountUtil from "./account";
 import * as LogUtil from "./log";
+import { strip0xPrefix } from "../models/logic/utils/format";
 
 const ASYNC_LOCK_KEY = "worker";
 
@@ -24,11 +25,14 @@ export default class Worker {
     private watchJob!: Job;
     private config: WorkerConfig;
     private lock: AsyncLock;
-
+    private lastIndexedPendingTime: number | null;
+    private numlist: Array<number>;
     constructor(context: WorkerContext, config: WorkerConfig) {
         this.context = context;
         this.config = config;
         this.lock = new AsyncLock({ timeout: 30000, maxPending: 100 });
+        this.lastIndexedPendingTime = null;
+        this.numlist = new Array();
     }
 
     public destroy() {
@@ -210,30 +214,76 @@ export default class Worker {
     };
 
     private indexPendingTransaction = async () => {
+        // timestmap
         console.log("======== indexing pending transactions =======");
+        console.log(
+            (await this.context.sdk.rpc.chain.getPendingTransactions(
+                this.lastIndexedPendingTime
+            )).transactions.length
+        );
         const {
-            transactions
+            transactions,
+            lastTimestamp
         } = await this.context.sdk.rpc.chain.getPendingTransactions();
+        if (lastTimestamp != null) {
+            if (this.numlist.indexOf(lastTimestamp) === -1) {
+                this.numlist.push(lastTimestamp);
+            }
+        }
+        console.log(`lastTimestamp == ${lastTimestamp}`);
+        console.log(this.numlist);
         const indexedHashes = await TxModel.getAllPendingTransactionHashes();
-
+        const indexed =  (await this.context.sdk.rpc.chain.getPendingTransactions()).transactions;
+        // console.log(JSON.stringify(indexed[0]))
+        // console.log(indexed);
+        // console.log(indexedHashes);
+        this.lastIndexedPendingTime = lastTimestamp;
         console.log(
             `Indexed: ${indexedHashes.length} / RPC: ${transactions.length}`
         );
 
-        // Remove dropped pending transactions
+        // await this.context.sdk.rpc.chain.getPendingTransactionsCount()
+
+        // Remove dropped pending transactions //  hash, seq, signer
         const pendingHashes = transactions.map(p => p.hash().value);
+        console.error(`transaction count ${transactions.length}`);
+        console.error(`pendingHash count ${pendingHashes.length}`);
+        console.error(`indexedHash count ${indexedHashes.length}`);
         const droppedPendingHashes = indexedHashes
             .filter(indexedHash => !pendingHashes.includes(indexedHash))
             .map(indexedHash => new H256(indexedHash));
-        if (droppedPendingHashes.length > 0) {
-            await TxModel.removePendings(droppedPendingHashes);
-        }
 
+         console.error("this is indexedHashes")
+         console.error(indexedHashes)
+         console.error("thisis pendingHashes")
+         console.error(pendingHashes)
+        console.error("this is original")
+        console.error(
+            droppedPendingHashes
+        );
+        /* if (droppedPendingHashes.length > 0) {
+            await TxModel.removePendings(droppedPendingHashes);
+        } */
+        console.error("indexed")
+        console.error(indexed.map(i => strip0xPrefix(i.hash().value)))
+            // .hash().value)))
+        console.error("test")
+        console.error(indexed.map(i=> i.toJSON().seq))
+        console.error(indexed.map(i=>i.getSignerAddress({networkId: i.toJSON().networkId}).getAccountId()))
+         //    strip0xPrefix(i.getSignerAddress({networkId: i.toJSON().networkId}).value)))
+
+        console.error("this is new")
+        console.error((await TxModel.newRemovePendingstest(indexed)).map(i => i.get().hash));
+        // await TxModel.newRemovePendings(indexed)
         // Index new pending transactions
         const newPendingTransactions = _.filter(
             transactions,
             pending => !_.includes(indexedHashes, pending.hash().value)
         );
+        console.log(
+            `newPendingTransaction count ${newPendingTransactions.length}`
+        );
+
         await TxModel.createTransactions(newPendingTransactions, true);
     };
 }
