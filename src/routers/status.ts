@@ -151,4 +151,50 @@ export function handle(context: IndexerContext, router: Router) {
             }
         }
     });
+
+    /**
+     * @swagger
+     * /status/stop:
+     *   get:
+     *     summary: codechain stop
+     *     tags: [Status]
+     *     responses:
+     *       200:
+     *         description: codechain stop
+     */
+    router.get("/status/stop", async (_, res, next) => {
+        try {
+            await context.sdk.rpc.devel.stopSealing();
+        } catch (e) {
+            const error = e as Error;
+            if (error.message.search(/ECONNRESET|ECONNREFUSED/) >= 0) {
+                res.status(SERVICE_UNAVAILABLE).send();
+            } else {
+                next(e);
+            }
+        }
+    });
+
+    /**
+     * @swagger
+     * /status/go:
+     *   get:
+     *     summary: codechain go
+     *     tags: [Status]
+     *     responses:
+     *       200:
+     *         description: codechain go
+     */
+    router.get("/status/go", async (_, res, next) => {
+        try {
+            await context.sdk.rpc.devel.startSealing();
+        } catch (e) {
+            const error = e as Error;
+            if (error.message.search(/ECONNRESET|ECONNREFUSED/) >= 0) {
+                res.status(SERVICE_UNAVAILABLE).send();
+            } else {
+                next(e);
+            }
+        }
+    });
 }

@@ -24,11 +24,14 @@ export default class Worker {
     private watchJob!: Job;
     private config: WorkerConfig;
     private lock: AsyncLock;
-
+    private lastIndexedPendingTime: number | null;
+    private numlist: Array<number>;
     constructor(context: WorkerContext, config: WorkerConfig) {
         this.context = context;
         this.config = config;
         this.lock = new AsyncLock({ timeout: 30000, maxPending: 100 });
+        this.lastIndexedPendingTime = null;
+        this.numlist = new Array();
     }
 
     public destroy() {
@@ -209,24 +212,41 @@ export default class Worker {
         await LogUtil.indexLog(block, true);
     };
 
-    private indexPendingTransaction = async () => {
+    private indexPendingTransaction = async () => { // 다 되면 time last stamp from to로 맞춰서 적당히 시간 조절해서 하기 .
         console.log("======== indexing pending transactions =======");
+        console.log((await this.context.sdk.rpc.chain.getPendingTransactions(this.lastIndexedPendingTime)).transactions.length);
         const {
-            transactions
+            transactions, lastTimestamp
         } = await this.context.sdk.rpc.chain.getPendingTransactions();
+        if(lastTimestamp!=null){this.numlist.push(lastTimestamp)}
+        console.log(this.numlist)
         const indexedHashes = await TxModel.getAllPendingTransactionHashes();
-
+        this.lastIndexedPendingTime = lastTimestamp
         console.log(
             `Indexed: ${indexedHashes.length} / RPC: ${transactions.length}`
         );
 
-        // Remove dropped pending transactions
+        for(let i in this.numlist) {
+            if(Number(i)< this.numlist.length) {
+                const num = Number(i)
+                const alpha = await this.context.sdk.rpc.chain.getPendingTransactionsCount(this.numlist[num-1], this.numlist[num])
+                console.error(`hehe count of ${num-1} and ${num} is ${alpha}`)
+            }
+        }
+        // await this.context.sdk.rpc.chain.getPendingTransactionsCount()
+
+        // Remove dropped pending transactions // 여기있는걸 고치는데, hash, seq, signer같으면 같은걸로,. (drop됨 처리.)
+        // pending은 devel에 있는걸로, 그리고 fee를 높이면 이전게 drop 될 것임
         const pendingHashes = transactions.map(p => p.hash().value);
+        console.error(transactions.length)
+        console.error(pendingHashes.length)
+        console.error(indexedHashes.length)
         const droppedPendingHashes = indexedHashes
             .filter(indexedHash => !pendingHashes.includes(indexedHash))
             .map(indexedHash => new H256(indexedHash));
+        console.error(droppedPendingHashes.length)
         if (droppedPendingHashes.length > 0) {
-            await TxModel.removePendings(droppedPendingHashes);
+            // await TxModel.removePendings(droppedPendingHashes);
         }
 
         // Index new pending transactions
@@ -234,6 +254,7 @@ export default class Worker {
             transactions,
             pending => !_.includes(indexedHashes, pending.hash().value)
         );
+        console.log(newPendingTransactions.length)
         await TxModel.createTransactions(newPendingTransactions, true);
     };
 }
